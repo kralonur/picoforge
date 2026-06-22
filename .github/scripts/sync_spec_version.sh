@@ -27,13 +27,20 @@ echo "Spec Release:  $CURRENT_SPEC_RELEASE"
 
 if [ "$NEW_VERSION" != "$CURRENT_SPEC_VERSION" ]; then
     echo "New version detected. Resetting Release to 1."
+    NEW_RELEASE=1
     sed -i "s/^Version:.*/Version:        $NEW_VERSION/" picoforge.spec
-    sed -i "s/^Release:.*/Release:        1%{?dist}/" picoforge.spec
 else
     echo "Version match. Incrementing Release number."
     NEW_RELEASE=$((CURRENT_SPEC_RELEASE + 1))
-    sed -i "s/^Release:.*/Release:        $NEW_RELEASE%{?dist}/" picoforge.spec
 fi
+
+# Keep bumping until we find a tag that doesn't exist yet
+while git rev-parse "picoforge-${NEW_VERSION}-${NEW_RELEASE}" >/dev/null 2>&1; do
+    echo "Tag picoforge-${NEW_VERSION}-${NEW_RELEASE} already exists, incrementing..."
+    NEW_RELEASE=$((NEW_RELEASE + 1))
+done
+
+sed -i "s/^Release:.*/Release:        ${NEW_RELEASE}%{?dist}/" picoforge.spec
 
 if git diff --quiet picoforge.spec; then
 echo "No changes to spec file."
