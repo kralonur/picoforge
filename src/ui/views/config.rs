@@ -1,5 +1,6 @@
 use crate::device::types::{AppConfigInput, DeviceMethod};
 use crate::device::{fido, io};
+use crate::device::rescue::constants::{LedColor, LedStatus, USB_CAP_OTP, USB_CAP_U2F, USB_CAP_OPENPGP, USB_CAP_PIV, USB_CAP_OATH, USB_CAP_FIDO2};
 use crate::ui::components::dialog::PinPromptContent;
 use crate::ui::components::{card::Card, dialog, dialog::StatusContent, page_view::PageView};
 use crate::ui::rootview::ApplicationRoot;
@@ -73,6 +74,14 @@ pub struct ConfigView {
     enable_secp256k1: bool,
     loading: bool,
     is_custom_vendor: bool,
+    
+    // RS-Key specific state
+    led_status_steady: bool,
+    led_status_colors: [u8; 4],
+    led_status_brightness: [u8; 4],
+    usb_apps_supported: u16,
+    usb_apps_enabled: u16,
+
     _task: Option<Task<()>>,
 }
 
@@ -194,6 +203,24 @@ impl ConfigView {
         let touch_timeout_input =
             cx.new(|cx| InputState::new(window, cx).default_value(current_touch_timeout.clone()));
 
+        let mut led_status_steady = false;
+        let mut led_status_colors = [0; 4];
+        let mut led_status_brightness = [0; 4];
+        if let Some(led) = &device.led_status {
+            led_status_steady = led.steady;
+            for i in 0..4 {
+                led_status_colors[i] = led.statuses[i].0;
+                led_status_brightness[i] = led.statuses[i].1;
+            }
+        }
+
+        let mut usb_apps_supported = 0;
+        let mut usb_apps_enabled = 0;
+        if let Some(apps) = &device.management_apps {
+            usb_apps_supported = apps.usb_supported;
+            usb_apps_enabled = apps.usb_enabled;
+        }
+
         Self {
             root,
             vendor_select,
@@ -210,6 +237,11 @@ impl ConfigView {
             enable_secp256k1: config.map(|c| c.enable_secp256k1).unwrap_or(true),
             loading: false,
             is_custom_vendor,
+            led_status_steady,
+            led_status_colors,
+            led_status_brightness,
+            usb_apps_supported,
+            usb_apps_enabled,
             _task: None,
         }
     }
@@ -384,6 +416,7 @@ impl ConfigView {
             power_cycle_on_reset: None,
             led_steady: None,
             enable_secp256k1: None,
+            led_order: None,
         };
 
         let vid = self.vid_input.read(cx).text().to_string();
@@ -553,6 +586,19 @@ impl ConfigView {
                 cx,
             );
         });
+
+        if let Some(led) = &device.led_status {
+            self.led_status_steady = led.steady;
+            for i in 0..4 {
+                self.led_status_colors[i] = led.statuses[i].0;
+                self.led_status_brightness[i] = led.statuses[i].1;
+            }
+        }
+
+        if let Some(apps) = &device.management_apps {
+            self.usb_apps_supported = apps.usb_supported;
+            self.usb_apps_enabled = apps.usb_enabled;
+        }
 
         cx.notify();
     }
@@ -794,6 +840,266 @@ impl ConfigView {
             .icon(Icon::default().path("icons/settings.svg"))
             .child(content)
     }
+
+    /// Renders the RS-Key-specific LED configuration card.
+    ///
+    /// This dynamic panel iterates through the device's LED operating statuses (Idle, Processing,
+    /// Touch, Boot) and provides interactive widgets to customize the active color and brightness
+    /// level for each. Only displayed when an RS-Key firmware is detected.
+    fn render_rskey_led_card(&mut self, cx: &mut Context<Self>, is_fido: bool) -> impl IntoElement {
+        let theme = cx.theme();
+        let mut rows = v_flex().gap_4();
+
+        // Steady switch
+        let steady_listener = cx.listener(|this, checked, _, cx| {
+            this.led_status_steady = *checked;
+            cx.notify();
+        });
+
+        rows = rows.child(
+            gpui_component::h_flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    v_flex().gap_0p5().child("Global Steady Mode").child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child("Keep status LEDs on constantly"),
+                    ),
+                )
+                .child(
+                    Switch::new("rskey-led-steady")
+                        .checked(self.led_status_steady)
+                        .disabled(is_fido)
+                        .on_click(steady_listener),
+                ),
+        );
+
+        rows = rows.child(div().h_px().bg(theme.border));
+
+        // Create rows for each status
+        for (i, status) in LedStatus::all().iter().enumerate() {
+            let color_val = self.led_status_colors[i];
+            let brightness_val = self.led_status_brightness[i];
+
+            // A dropdown for color, and a simple + / - or slider for brightness.
+            // But we don't have a simple dropdown component that works inline easily without a state entity per row.
+            // Let's just use a simple label and two buttons to cycle color, or we can instantiate 4 SelectStates?
+            // Since we need SelectState for dropdowns, we can't easily spawn them dynamically in render without keeping them in the struct.
+            // A simpler approach for the UI: Just show the current color text and + / - buttons to cycle it, and + / - for brightness.
+            // This avoids adding 4 SelectStates and 4 SliderStates to ConfigView.
+            let c_i = i;
+            let cycle_color_listener = cx.listener(move |this, _, _, cx| {
+                let mut c = this.led_status_colors[c_i];
+                c = (c + 1) % 8;
+                this.led_status_colors[c_i] = c;
+                cx.notify();
+            });
+
+            let dec_bright_listener = cx.listener(move |this, _, _, cx| {
+                let mut b = this.led_status_brightness[c_i];
+                if b > 0 { b -= 1; }
+                this.led_status_brightness[c_i] = b;
+                cx.notify();
+            });
+
+            let inc_bright_listener = cx.listener(move |this, _, _, cx| {
+                let mut b = this.led_status_brightness[c_i];
+                if b < 15 { b += 1; }
+                this.led_status_brightness[c_i] = b;
+                cx.notify();
+            });
+
+            let color_name = LedColor::from_u8(color_val).map(|c| c.label()).unwrap_or("Unknown");
+
+            rows = rows.child(
+                gpui_component::h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().w_24().child(status.label()))
+                    .child(
+                        gpui_component::h_flex().gap_2().items_center()
+                            .child(
+                                Button::new(gpui::SharedString::from(format!("color-btn-{}", i)))
+                                    .child(color_name)
+                                    .disabled(is_fido)
+                                    .on_click(cycle_color_listener)
+                            )
+                            .child(div().w_4())
+                            .child(
+                                Button::new(gpui::SharedString::from(format!("bdec-btn-{}", i)))
+                                    .child("-")
+                                    .disabled(is_fido || brightness_val == 0)
+                                    .on_click(dec_bright_listener)
+                            )
+                            .child(div().w_8().flex().justify_center().child(brightness_val.to_string()))
+                            .child(
+                                Button::new(gpui::SharedString::from(format!("binc-btn-{}", i)))
+                                    .child("+")
+                                    .disabled(is_fido || brightness_val == 15)
+                                    .on_click(inc_bright_listener)
+                            )
+                    )
+            );
+        }
+
+        // Add a save button for LED status
+        rows = rows.child(div().h_px().bg(theme.border));
+        rows = rows.child(
+            gpui_component::h_flex().justify_end().child(
+                Button::new("apply-rskey-leds")
+                    .child("Save LED Status")
+                    .disabled(is_fido || self.loading)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.apply_rskey_led_settings(window, cx);
+                    }))
+            )
+        );
+
+        Card::new()
+            .title("Status LED Colors")
+            .description("Configure LED colors and brightness per device state")
+            .icon(Icon::default().path("icons/palette.svg"))
+            .child(rows)
+    }
+
+    fn apply_rskey_led_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let steady = self.led_status_steady;
+        let colors = self.led_status_colors;
+        let brightnesses = self.led_status_brightness;
+
+        self.loading = true;
+        let handle = dialog::open_status_dialog("Applying LED Configuration...", window, cx);
+        let entity = cx.entity().downgrade();
+
+        self._task = Some(cx.spawn(async move |_, cx| {
+            let result = cx.background_executor().spawn(async move {
+                for i in 0..4 {
+                    io::write_led_status(i as u8, colors[i], brightnesses[i], steady)?;
+                }
+                Ok::<_, crate::error::PFError>(())
+            }).await;
+
+            let _ = entity.update(cx, |this, cx| {
+                this.loading = false;
+                match result {
+                    Ok(_) => {
+                        let _ = handle.update(cx, |d, cx| {
+                            d.set_success("LED configuration applied successfully.".to_string(), cx);
+                        });
+                    }
+                    Err(e) => {
+                        let _ = handle.update(cx, |d, cx| {
+                            d.set_error(format!("Failed to apply LED config: {}", e), cx);
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Renders the RS-Key-specific USB Applications management card.
+    ///
+    /// Provides toggles to enable or disable USB endpoints such as U2F, OATH, PIV, and OpenPGP.
+    /// Safely computes the bitmasks and writes to the Management applet. Gated by hardware support.
+    fn render_rskey_apps_card(&mut self, cx: &mut Context<Self>, is_fido: bool) -> impl IntoElement {
+        let theme = cx.theme();
+        let mut rows = v_flex().gap_4();
+
+        let apps = [
+            ("FIDO2", USB_CAP_FIDO2),
+            ("OATH", USB_CAP_OATH),
+            ("PIV", USB_CAP_PIV),
+            ("OpenPGP", USB_CAP_OPENPGP),
+            ("U2F", USB_CAP_U2F),
+            ("OTP", USB_CAP_OTP),
+        ];
+
+        for (name, cap) in apps {
+            let is_supported = (self.usb_apps_supported & cap) != 0;
+            let is_enabled = (self.usb_apps_enabled & cap) != 0;
+
+            let toggle_listener = cx.listener(move |this, checked, _, cx| {
+                if *checked {
+                    this.usb_apps_enabled |= cap;
+                } else {
+                    this.usb_apps_enabled &= !cap;
+                }
+                cx.notify();
+            });
+
+            rows = rows.child(
+                gpui_component::h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        v_flex().gap_0p5().child(name).child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child(if is_supported { "Supported" } else { "Not Supported by Firmware" }),
+                        ),
+                    )
+                    .child(
+                        Switch::new(gpui::SharedString::from(format!("app-toggle-{}", cap)))
+                            .checked(is_enabled)
+                            .disabled(is_fido || !is_supported)
+                            .on_click(toggle_listener),
+                    ),
+            );
+        }
+
+        rows = rows.child(div().h_px().bg(theme.border));
+        rows = rows.child(
+            gpui_component::h_flex().justify_end().child(
+                Button::new("apply-rskey-apps")
+                    .child("Save USB Applications")
+                    .disabled(is_fido || self.loading)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.apply_rskey_apps_settings(window, cx);
+                    }))
+            )
+        );
+
+        Card::new()
+            .title("USB Applications")
+            .description("Enable or disable specific USB features")
+            .icon(Icon::default().path("icons/microchip.svg"))
+            .child(rows)
+    }
+
+    fn apply_rskey_apps_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mask = self.usb_apps_enabled;
+        
+        self.loading = true;
+        let handle = dialog::open_status_dialog("Applying USB Applications...", window, cx);
+        let entity = cx.entity().downgrade();
+
+        self._task = Some(cx.spawn(async move |_, cx| {
+            let result = cx.background_executor().spawn(async move {
+                io::write_management_config(mask)
+            }).await;
+
+            let _ = entity.update(cx, |this, cx| {
+                this.loading = false;
+                match result {
+                    Ok(_) => {
+                        let _ = handle.update(cx, |d, cx| {
+                            d.set_success("USB applications updated successfully. Please re-plug the device.".to_string(), cx);
+                        });
+                    }
+                    Err(e) => {
+                        let _ = handle.update(cx, |d, cx| {
+                            d.set_error(format!("Failed to apply USB applications: {}", e), cx);
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        }));
+    }
 }
 
 impl Render for ConfigView {
@@ -845,16 +1151,32 @@ impl Render for ConfigView {
             .render_options_card(cx, is_fido, hardware_config_disabled)
             .into_any_element();
 
-        let theme = cx.theme();
-
         let identity_card = self
-            .render_identity_card(theme, is_fido, hardware_config_disabled)
+            .render_identity_card(cx.theme(), is_fido, hardware_config_disabled)
             .into_any_element();
-        let touch_card = self.render_touch_card(theme, is_fido).into_any_element();
+        let touch_card = self.render_touch_card(cx.theme(), is_fido).into_any_element();
 
         let is_wide = window.bounds().size.width > px(1100.0);
         let columns = if is_wide { 2 } else { 1 };
 
+        let is_rskey = status.as_ref().map(|s| &s.firmware_type) == Some(&crate::device::types::FirmwareType::RSKey);
+
+        let mut grid_children = vec![
+            identity_card,
+            led_card,
+            touch_card,
+            options_card,
+        ];
+
+        if is_rskey {
+            let rskey_led = self.render_rskey_led_card(cx, is_fido).into_any_element();
+            let rskey_apps = self.render_rskey_apps_card(cx, is_fido).into_any_element();
+            grid_children.push(rskey_led);
+            grid_children.push(rskey_apps);
+        }
+
+        let theme = cx.theme();
+        
         PageView::build(
             "Configuration",
             "Customize device settings and behavior.",
@@ -865,10 +1187,7 @@ impl Render for ConfigView {
                         .grid()
                         .grid_cols(columns)
                         .gap_6()
-                        .child(identity_card)
-                        .child(led_card)
-                        .child(touch_card)
-                        .child(options_card),
+                        .children(grid_children),
                 )
                 .child(
                     gpui_component::h_flex().justify_end().pt_4().child(

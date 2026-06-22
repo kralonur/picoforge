@@ -164,13 +164,24 @@ impl HidTransport {
     }
 
     pub fn send_cbor(&self, cmd: u8, payload: &[u8]) -> Result<Vec<u8>, PFError> {
+        self.send_cbor_with_timeout(cmd, payload, HID_TOTAL_TIMEOUT_MS)
+    }
+
+    pub fn send_cbor_with_timeout(&self, cmd: u8, payload: &[u8], timeout_ms: i32) -> Result<Vec<u8>, PFError> {
         self.write_cbor_request(cmd, payload)?;
-        self.read_cbor_response(cmd)
+        self.read_cbor_response(cmd, timeout_ms)
     }
 
     pub fn send_raw(&self, cmd: u8, payload: &[u8]) -> Result<Vec<u8>, PFError> {
         self.write_cbor_request(cmd, payload)?;
-        self.read_hid_response(cmd)
+        self.read_hid_response(cmd, HID_TOTAL_TIMEOUT_MS)
+    }
+
+    pub fn reset(&self) -> Result<(), PFError> {
+        log::info!("Sending CTAP authenticatorReset (0x07)...");
+        self.write_cbor_request(CTAPHID_CBOR, &[0x07])?;
+        self.read_cbor_response(CTAPHID_CBOR, 30_000)?;
+        Ok(())
     }
 
     fn write_cbor_request(&self, cmd: u8, payload: &[u8]) -> Result<(), PFError> {
@@ -239,8 +250,8 @@ impl HidTransport {
         Ok(())
     }
 
-    fn read_cbor_response(&self, cmd: u8) -> Result<Vec<u8>, PFError> {
-        let response_data = self.read_hid_response(cmd)?;
+    fn read_cbor_response(&self, cmd: u8, timeout_ms: i32) -> Result<Vec<u8>, PFError> {
+        let response_data = self.read_hid_response(cmd, timeout_ms)?;
 
         // Check CTAP Status Byte (First byte of payload)
         if response_data.is_empty() {
@@ -265,7 +276,7 @@ impl HidTransport {
         Ok(response_data[1..].to_vec())
     }
 
-    fn read_hid_response(&self, cmd: u8) -> Result<Vec<u8>, PFError> {
+    fn read_hid_response(&self, cmd: u8, timeout_ms: i32) -> Result<Vec<u8>, PFError> {
         log::debug!("Waiting for response...");
 
         let mut buf = [0u8; HID_REPORT_SIZE];
@@ -275,7 +286,7 @@ impl HidTransport {
         let mut last_seq = 0;
 
         let start_time = std::time::Instant::now();
-        let timeout_duration = std::time::Duration::from_millis(HID_TOTAL_TIMEOUT_MS as u64);
+        let timeout_duration = std::time::Duration::from_millis(timeout_ms as u64);
 
         // 1. Read First Packet (Loop to handle Keepalives)
         loop {

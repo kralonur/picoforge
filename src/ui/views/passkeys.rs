@@ -13,7 +13,7 @@ use directories::UserDirs;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::Disableable;
-use gpui_component::button::{Button, ButtonVariant, ButtonVariants};
+use gpui_component::button::{Button, ButtonVariant, ButtonVariants, ButtonCustomVariant};
 use gpui_component::{
     ActiveTheme, Icon, Placement, Sizable, StyledExt, Theme, WindowExt,
     badge::Badge,
@@ -223,7 +223,7 @@ impl PasskeysView {
             ButtonVariant::Danger,
             window,
             cx,
-            move |dialog_handle, cx| {
+            move |dialog_handle, _, cx| {
                 let _ = view_handle.update(cx, |this, cx| {
                     this.execute_delete(cred_id.clone(), pin_str.clone(), dialog_handle, cx);
                 });
@@ -986,9 +986,9 @@ impl PasskeysView {
             );
 
         Card::new()
-            .title("Enterprise Attestation Certificate")
-            .icon(Icon::default().path("icons/scroll-text.svg"))
-            .description("Manage the device enterprise attestation")
+            .title("Enterprise Attestation")
+            .description("Configure enterprise-specific features")
+            .icon(Icon::default().path("icons/shield-check.svg"))
             .child(
                 v_flex()
                     .gap_3()
@@ -996,6 +996,55 @@ impl PasskeysView {
                     .child(csr_row)
                     .child(upload_row),
             )
+    }
+
+    fn render_reset_device_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+
+        let header = gpui_component::h_flex()
+            .items_center()
+            .justify_between()
+            .w_full()
+            .gap_4()
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(theme.foreground)
+                            .child("Factory Reset"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child("Erase all passkeys, credentials, and PIN. Cannot be undone."),
+                    ),
+            )
+            .child(
+                Button::new("reset-device")
+                    .icon(Icon::default().path("icons/circle-alert.svg"))
+                    .child("Reset Device")
+                    .custom(
+                        ButtonCustomVariant::new(cx)
+                            .color(theme.danger.into())
+                            .hover(theme.danger_hover.into())
+                            .active(theme.danger_active.into())
+                            .foreground(theme.danger_foreground.into()),
+                    )
+                    .disabled(self.loading)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_reset_dialog(window, cx);
+                    })),
+            );
+
+        Card::new()
+            .title("Reset")
+            .description("Perform a destructive factory reset")
+            .icon(Icon::default().path("icons/trash.svg"))
+            .child(header)
     }
 
     fn render_no_device(&self, theme: &Theme) -> impl IntoElement {
@@ -1030,6 +1079,116 @@ impl PasskeysView {
                     .child("FIDO Passkeys are not supported on this device."),
             )
             .into_any_element()
+    }
+
+    /// Triggers the confirmation flow for a hardware factory reset.
+    ///
+    /// Warns the user of the destructive nature of this action (all credentials, passkeys,
+    /// and PINs will be irrecoverably erased) via a GPUI modal dialog. If confirmed,
+    /// it transitions to `execute_reset` to begin the 10-second touch confirmation window.
+    fn open_reset_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let view_handle = cx.entity().downgrade();
+
+        dialog::open_confirm(
+            "Factory Reset Device",
+            "Are you sure you want to completely erase your device? This will permanently delete ALL passkeys, credentials, and your PIN. This action cannot be undone.".to_string(),
+            "Reset Device",
+            ButtonVariant::Danger,
+            window,
+            cx,
+            move |_dialog_handle, window, cx| {
+                // Close the confirm dialog before opening the status dialog
+                window.close_dialog(cx);
+                // When they click confirm, we swap to a status dialog for the reconnect wizard
+                let _ = view_handle.update(cx, |this, cx| {
+                    this.execute_reset(window, cx);
+                });
+            },
+        );
+    }
+
+    /// Orchestrates the underlying FIDO factory reset protocol asynchronously.
+    ///
+    /// Changes the UI to a loading/status phase instructing the user to unplug, replug,
+    /// and touch the key within 10 seconds. Monitors the reset task and propagates any
+    /// success or error state back to the UI thread upon completion.
+    fn execute_reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.loading {
+            return;
+        }
+        self.loading = true;
+        
+        let status_handle = dialog::open_status_dialog("Resetting Device...", window, cx);
+        let entity = cx.entity().downgrade();
+
+        let _ = status_handle.update(cx, |d, cx| {
+            d.set_loading("Unplug your security key, then plug it back in within 10 seconds.", cx);
+        });
+
+        self._task = Some(cx.spawn(async move |_, cx| {
+            // Wait for unplug/replug
+            let reconnected = cx.background_executor().spawn(async move {
+                let start = std::time::Instant::now();
+                // 1. Wait for unplug
+                while start.elapsed().as_secs() < 15 {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    if crate::device::fido::hid::HidTransport::open().is_err() {
+                        break;
+                    }
+                }
+                
+                // 2. Wait for replug
+                while start.elapsed().as_secs() < 15 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    if crate::device::fido::hid::HidTransport::open().is_ok() {
+                        return true;
+                    }
+                }
+                false
+            }).await;
+
+            if !reconnected {
+                let _ = entity.update(cx, |this, cx| {
+                    this.loading = false;
+                    let _ = status_handle.update(cx, |d, cx| {
+                        d.set_error("Timeout waiting for device reconnection. Reset canceled.".to_string(), cx);
+                    });
+                    cx.notify();
+                });
+                return;
+            }
+
+            // Tell user to touch
+            let _ = status_handle.update(cx, |d, cx| {
+                d.set_loading("Touch your security key now to confirm the reset...", cx);
+            });
+
+            // Execute reset
+            let result = cx.background_executor().spawn(async move {
+                io::reset_device()
+            }).await;
+
+            let _ = entity.update(cx, |this, cx| {
+                this.loading = false;
+                match result {
+                    Ok(msg) => {
+                        log::info!("Device Reset: {}", msg);
+                        this.lock_storage(cx); // clear cached pin/creds
+                        let _ = status_handle.update(cx, |d, cx| {
+                            d.set_success(msg, cx);
+                        });
+                        cx.emit(PasskeysEvent::Notification("Device reset successfully".into()));
+                    }
+                    Err(e) => {
+                        log::error!("Error resetting device: {}", e);
+                        let _ = status_handle.update(cx, |d, cx| {
+                            d.set_error(format!("Reset failed: {}", e), cx);
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        }));
     }
 
     fn render_pin_management(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1595,7 +1754,8 @@ impl Render for PasskeysView {
             .gap_6()
             .child(self.render_pin_management(cx))
             .child(self.render_stored_passkeys(cx))
-            .child(self.render_enterprise_attestation(cx));
+            .child(self.render_enterprise_attestation(cx))
+            .child(self.render_reset_device_row(cx));
 
         let theme = cx.theme();
 

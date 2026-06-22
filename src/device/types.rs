@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 struct PForgeState {
     device_info: DeviceInfo,
@@ -30,6 +31,8 @@ pub struct AppConfig {
     pub power_cycle_on_reset: bool,
     pub led_steady: bool,
     pub enable_secp256k1: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub led_order: Option<u8>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -46,6 +49,7 @@ pub struct AppConfigInput {
     pub power_cycle_on_reset: Option<bool>,
     pub led_steady: Option<bool>,
     pub enable_secp256k1: Option<bool>,
+    pub led_order: Option<u8>,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -56,6 +60,7 @@ pub struct FullDeviceStatus {
     pub secure_boot: bool,
     pub secure_lock: bool,
     pub method: DeviceMethod,
+    pub firmware_type: FirmwareType,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -63,6 +68,49 @@ pub enum DeviceMethod {
     #[serde(rename = "FIDO")]
     Fido,
     Rescue,
+}
+
+/// Represents the recognized firmware variants running on the connected hardware token.
+/// Used extensively to gate UI features, connection methods, and compatibility checks.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub enum FirmwareType {
+    PicoFido,
+    RSKey,
+    #[default]
+    Unknown,
+}
+
+impl fmt::Display for FirmwareType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PicoFido => write!(f, "Pico-FIDO"),
+            Self::RSKey => write!(f, "RS-Key"),
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+/// The globally unique Authenticator Attestation GUID (AAGUID) assigned to RS-Key hardware.
+pub const RSKEY_AAGUID: &str = "2479C7BF6B3056839EC80E8171A918B7";
+/// The globally unique Authenticator Attestation GUID (AAGUID) assigned to Pico-Fido hardware.
+pub const PICOFIDO_AAGUID: &str = "89FB94B706C936739B7E30526D968145";
+
+/// Aggregates the LED status configurations read from the RS-Key Vendor/LED applet.
+/// Contains the global steady flag and a fixed array of `(color_code, brightness)` pairs
+/// mapped chronologically to device statuses: [Idle, Processing, Touch, Boot].
+#[derive(Serialize, Debug, Default, Clone, PartialEq)]
+pub struct LedStatusConfig {
+    pub steady: bool,
+    pub statuses: [(u8, u8); 4],
+}
+
+/// Encapsulates the bitmasks defining USB application endpoints on the device.
+/// The `usb_supported` mask indicates which applets the firmware is capable of running,
+/// while `usb_enabled` reflects the active endpoints the device will enumerate on next boot.
+#[derive(Serialize, Debug, Default, Clone, PartialEq)]
+pub struct ManagementAppConfig {
+    pub usb_supported: u16,
+    pub usb_enabled: u16,
 }
 
 // Fido stuff:

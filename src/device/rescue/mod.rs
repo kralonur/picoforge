@@ -10,8 +10,27 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use pcsc::{Context, Protocols, Scope, ShareMode};
 use std::io::Cursor;
 
+/// Differentiates between Pico-Fido and RS-Key firmwares based on the Rescue Applet SELECT response.
+///
+/// **WARNING:** This is a temporary heuristic that relies on the major version byte (`major >= 8` implies RS-Key).
+/// If Pico-Fido releases v8.x, this logic will silently fail and misidentify devices.
+/// 
+/// TODO: Work with upstream RS-Key maintainers to expose a unique identity block or hardware string
+/// in the SELECT response to reliably differentiate the firmwares in the long term.
+fn detect_firmware_type(select_resp: &[u8]) -> FirmwareType {
+    if select_resp.len() >= 4 {
+        let major = select_resp[2];
+        if major >= 8 {
+            return FirmwareType::RSKey;
+        } else {
+            return FirmwareType::PicoFido;
+        }
+    }
+    FirmwareType::Unknown
+}
+
 /// Connects to the first available reader and selects the Rescue Applet
-fn connect_and_select() -> Result<(pcsc::Card, Vec<u8>), PFError> {
+fn connect_and_select() -> Result<(pcsc::Card, Vec<u8>, FirmwareType), PFError> {
     let ctx = Context::establish(Scope::User).map_err(|e| {
         log::error!("Failed to establish PCSC context: {}", e);
         PFError::Pcsc(e)
@@ -52,12 +71,15 @@ fn connect_and_select() -> Result<(pcsc::Card, Vec<u8>), PFError> {
     }
 
     log::info!("Successfully connected to Rescue Applet");
-    Ok((card, rx.to_vec()))
+    let data = rx.to_vec();
+    let fw_type = detect_firmware_type(&data);
+    log::info!("Detected firmware type: {:?}", fw_type);
+    Ok((card, data, fw_type))
 }
 
 pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
     log::info!("Reading full device details");
-    let (card, select_resp) = connect_and_select()?;
+    let (card, select_resp, fw_type) = connect_and_select()?;
 
     log::info!("Select Response: {:?}", select_resp);
 
@@ -213,6 +235,11 @@ pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
                         config.led_driver = Some(val[0]);
                     }
                 }
+                PhyTag::LedOrder => {
+                    if !val.is_empty() {
+                        config.led_order = Some(val[0]);
+                    }
+                }
             }
         }
         i += len;
@@ -236,6 +263,7 @@ pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
         secure_boot: sb_enabled,
         secure_lock: sb_locked,
         method: DeviceMethod::Rescue,
+        firmware_type: fw_type,
     })
 }
 
@@ -332,7 +360,14 @@ pub fn write_config(config: AppConfigInput) -> Result<String, PFError> {
         tlv.push(PhyTag::UsbProduct as u8);
         tlv.push(len as u8);
         tlv.extend_from_slice(name_bytes);
-        tlv.push(0x00); // Null terminator
+        tlv.push(0x00);
+    }
+
+    // LED Order (Tag 0x0D) — RS-Key extension, silently preserved
+    if let Some(val) = config.led_order {
+        tlv.push(PhyTag::LedOrder as u8);
+        tlv.push(0x01);
+        tlv.push(val);
     }
 
     // 2. Connect and Send
@@ -343,7 +378,7 @@ pub fn write_config(config: AppConfigInput) -> Result<String, PFError> {
 
     log::debug!("TLV payload size: {} bytes", tlv.len());
 
-    let (card, _) = connect_and_select()?;
+    let (card, _, _) = connect_and_select()?;
 
     // APDU: 80 1C 01 00 [Lc] [Data]
     let mut apdu = vec![
@@ -368,7 +403,7 @@ pub fn write_config(config: AppConfigInput) -> Result<String, PFError> {
 }
 
 pub fn reboot_device(to_bootsel: bool) -> Result<String, PFError> {
-    let (card, _) = connect_and_select()?;
+    let (card, _, _) = connect_and_select()?;
 
     let param = if to_bootsel {
         RebootParam::Bootsel
@@ -396,7 +431,7 @@ pub fn reboot_device(to_bootsel: bool) -> Result<String, PFError> {
 
 /// UNSTABLE! (WIP)
 pub fn enable_secure_boot(lock: bool) -> Result<String, PFError> {
-    let (card, _) = connect_and_select()?;
+    let (card, _, _) = connect_and_select()?;
 
     // APDU: 80 1D [KeyIndex] [LockBool] 00
     // KeyIndex = 0 (Default), LockBool = 1 if true
@@ -417,5 +452,232 @@ pub fn enable_secure_boot(lock: bool) -> Result<String, PFError> {
         Ok("Secure Boot Enabled".into())
     } else {
         Err(PFError::Device(format!("Secure Boot failed: {:02X?}", rx)))
+    }
+}
+
+// --- Vendor/LED Applet (RS-Key) ---
+
+fn connect_and_select_aid(aid: &[u8]) -> Result<pcsc::Card, PFError> {
+    let ctx = Context::establish(Scope::User).map_err(|e| {
+        log::error!("Failed to establish PCSC context: {}", e);
+        PFError::Pcsc(e)
+    })?;
+
+    let mut readers_buf = [0; 2048];
+    let mut readers = ctx.list_readers(&mut readers_buf)?;
+    let reader = readers.next().ok_or_else(|| {
+        log::info!("No Smart Card Reader found");
+        PFError::NoDevice
+    })?;
+
+    let card = ctx.connect(reader, ShareMode::Shared, Protocols::ANY)?;
+
+    let mut apdu = vec![
+        APDU_CLA_ISO,
+        APDU_INS_SELECT,
+        APDU_P1_SELECT_BY_DF_NAME,
+        0x00,
+        aid.len() as u8,
+    ];
+    apdu.extend_from_slice(aid);
+    apdu.push(0x00);
+
+    let mut rx_buf = [0; 256];
+    let rx = card.transmit(&apdu, &mut rx_buf)?;
+
+    if !rx.ends_with(&[0x90, 0x00]) {
+        return Err(PFError::Device(
+            format!("Applet not found (AID {:02X?})", aid),
+        ));
+    }
+
+    Ok(card)
+}
+
+/// Reads the customized LED status configurations from the Vendor/LED applet.
+///
+/// Communicates with the `F0 00 00 00 01` applet to retrieve a 9-byte configuration block
+/// that dictates the color and brightness for each device state (idle, processing, touch, boot),
+/// as well as the global 'steady' toggle flag.
+pub fn read_led_config() -> Result<LedStatusConfig, PFError> {
+    log::info!("Reading LED status config from Vendor/LED applet");
+    let card = connect_and_select_aid(VENDOR_LED_AID)?;
+
+    let apdu = [
+        APDU_CLA_ISO,
+        VendorLedInstruction::GetLed as u8,
+        0x00,
+        0x00,
+        0x00,
+    ];
+    let mut rx_buf = [0; 256];
+    let rx = card.transmit(&apdu, &mut rx_buf)?;
+
+    if !rx.ends_with(&SW_SUCCESS) || rx.len() < 11 {
+        return Err(PFError::Device("Failed to read LED config".into()));
+    }
+
+    let data = &rx[..rx.len() - 2];
+    if data.len() < 9 {
+        return Err(PFError::Device("LED config response too short".into()));
+    }
+
+    let steady = data[0] != 0;
+    let mut statuses = [(0u8, 0u8); 4];
+    for s in 0..4 {
+        statuses[s] = (data[1 + 2 * s], data[2 + 2 * s]);
+    }
+
+    log::info!("LED config: steady={}, statuses={:?}", steady, statuses);
+    Ok(LedStatusConfig { steady, statuses })
+}
+
+/// Applies an individual LED status update to the Vendor/LED applet.
+///
+/// Constructs the APDU payload combining the targeted status index, color code, and global
+/// steady flag into `P2`, with the brightness value in `P1`. The update is persisted to flash
+/// and applied immediately.
+pub fn write_led_status(
+    status: u8,
+    color: u8,
+    brightness: u8,
+    steady: bool,
+) -> Result<String, PFError> {
+    log::info!(
+        "Setting LED: status={}, color={}, brightness={}, steady={}",
+        status, color, brightness, steady
+    );
+    let card = connect_and_select_aid(VENDOR_LED_AID)?;
+
+    let steady_bit: u8 = if steady { 0x08 } else { 0x00 };
+    let p2 = (color & 0x07) | steady_bit | ((status & 0x03) << 4);
+
+    let apdu = [
+        APDU_CLA_ISO,
+        VendorLedInstruction::SetLed as u8,
+        brightness,
+        p2,
+    ];
+    let mut rx_buf = [0; 256];
+    let rx = card.transmit(&apdu, &mut rx_buf)?;
+
+    if rx.ends_with(&SW_SUCCESS) {
+        Ok("LED status updated".into())
+    } else {
+        Err(PFError::Device(format!("SET LED failed: {:02X?}", rx)))
+    }
+}
+
+// --- Management Applet (RS-Key) ---
+
+/// Retrieves the device management configuration mapping from the Management applet.
+///
+/// Reads the active state of various USB interfaces (U2F, OATH, PIV, OpenPGP, etc.) to 
+/// determine which are supported by the hardware and which are currently enabled by the user.
+pub fn read_management_config() -> Result<ManagementAppConfig, PFError> {
+    log::info!("Reading management config from Management applet");
+    let card = connect_and_select_aid(MANAGEMENT_AID)?;
+
+    let apdu = [
+        APDU_CLA_ISO,
+        ManagementInstruction::ReadConfig as u8,
+        0x00,
+        0x00,
+        0x00,
+    ];
+    let mut rx_buf = [0; 256];
+    let rx = card.transmit(&apdu, &mut rx_buf)?;
+
+    if !rx.ends_with(&SW_SUCCESS) {
+        return Err(PFError::Device("Failed to read management config".into()));
+    }
+
+    let data = &rx[..rx.len() - 2];
+    if data.is_empty() {
+        return Err(PFError::Device("Empty management config response".into()));
+    }
+
+    let overall_len = data[0] as usize;
+    let tlv_data = if data.len() > 1 + overall_len {
+        &data[1..1 + overall_len]
+    } else {
+        &data[1..]
+    };
+
+    let mut config = ManagementAppConfig::default();
+    let mut i = 0;
+    while i < tlv_data.len() {
+        if i + 2 > tlv_data.len() {
+            break;
+        }
+        let tag = tlv_data[i];
+        let len = tlv_data[i + 1] as usize;
+        i += 2;
+        if i + len > tlv_data.len() {
+            break;
+        }
+        let val = &tlv_data[i..i + len];
+        match tag {
+            MGMT_TAG_USB_SUPPORTED => {
+                if val.len() >= 2 {
+                    config.usb_supported = u16::from_be_bytes([val[0], val[1]]);
+                }
+            }
+            MGMT_TAG_USB_ENABLED => {
+                if val.len() >= 2 {
+                    config.usb_enabled = u16::from_be_bytes([val[0], val[1]]);
+                }
+            }
+            _ => {
+                log::trace!("Management TLV tag 0x{:02X} skipped", tag);
+            }
+        }
+        i += len;
+    }
+
+    log::info!(
+        "Management config: supported=0x{:04X}, enabled=0x{:04X}",
+        config.usb_supported,
+        config.usb_enabled
+    );
+    Ok(config)
+}
+
+/// Persists updated management endpoint configurations to the device.
+///
+/// Overwrites the previously enabled interfaces with a new configuration bitmask.
+/// For the changes to fully apply across all composite USB endpoints, a subsequent 
+/// device reboot or re-plug is required.
+pub fn write_management_config(enabled_mask: u16) -> Result<String, PFError> {
+    log::info!("Writing management config: enabled=0x{:04X}", enabled_mask);
+    let card = connect_and_select_aid(MANAGEMENT_AID)?;
+
+    let inner = [
+        MGMT_TAG_USB_ENABLED,
+        0x02,
+        (enabled_mask >> 8) as u8,
+        (enabled_mask & 0xFF) as u8,
+    ];
+
+    let mut apdu = vec![
+        APDU_CLA_ISO,
+        ManagementInstruction::WriteConfig as u8,
+        0x00,
+        0x00,
+        (inner.len() + 1) as u8,
+        inner.len() as u8,
+    ];
+    apdu.extend_from_slice(&inner);
+
+    let mut rx_buf = [0; 256];
+    let rx = card.transmit(&apdu, &mut rx_buf)?;
+
+    if rx.ends_with(&SW_SUCCESS) {
+        Ok("USB applications updated".into())
+    } else {
+        Err(PFError::Device(format!(
+            "Management write failed: {:02X?}",
+            rx
+        )))
     }
 }

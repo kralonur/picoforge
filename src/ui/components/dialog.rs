@@ -8,7 +8,7 @@ use gpui_component::{
 };
 
 type PinPromptCallback = std::rc::Rc<dyn Fn(String, WeakEntity<PinPromptContent>, &mut App)>;
-type ConfirmCallback = std::rc::Rc<dyn Fn(WeakEntity<ConfirmContent>, &mut App)>;
+type ConfirmCallback = std::rc::Rc<dyn Fn(WeakEntity<ConfirmContent>, &mut Window, &mut App)>;
 type ChangePinCallback =
     std::rc::Rc<dyn Fn(String, String, WeakEntity<ChangePinContent>, &mut App)>;
 type SetPinCallback = std::rc::Rc<dyn Fn(String, WeakEntity<SetPinContent>, &mut App)>;
@@ -17,6 +17,9 @@ type SetPinCallback = std::rc::Rc<dyn Fn(String, WeakEntity<SetPinContent>, &mut
 enum DialogPhase {
     Input,
     Loading,
+    /// Indicates the dialog is blocked on an asynchronous background task, 
+    /// presenting a specific dynamic status message to guide the user (e.g. "Waiting for touch...").
+    LoadingWithMessage(String),
     Success(String),
     Error(String),
 }
@@ -92,7 +95,7 @@ impl Render for PinPromptContent {
                 )
                 .into_any_element(),
 
-            DialogPhase::Loading => v_flex()
+            DialogPhase::Loading | DialogPhase::LoadingWithMessage(_) => v_flex()
                 .gap_4()
                 .child(self.description.clone())
                 .child(Input::new(&self.pin_input).disabled(true))
@@ -365,7 +368,7 @@ impl Render for ConfirmContent {
                 )
                 .into_any_element(),
 
-            DialogPhase::Loading => v_flex()
+            DialogPhase::Loading | DialogPhase::LoadingWithMessage(_) => v_flex()
                 .gap_4()
                 .child(self.message.clone())
                 .child(
@@ -414,11 +417,11 @@ impl Render for ConfirmContent {
                                 Button::new("ok")
                                     .with_variant(ok_variant)
                                     .label(ok_label)
-                                    .on_click(move |_, _, cx| {
+                                    .on_click(move |_, window, cx| {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| this.set_loading(cx));
                                         }
-                                        on_ok(handle.clone(), cx);
+                                        on_ok(handle.clone(), window, cx);
                                     }),
                             ),
                     )
@@ -447,11 +450,11 @@ impl Render for ConfirmContent {
                                 Button::new("ok")
                                     .with_variant(ok_variant)
                                     .label(ok_label)
-                                    .on_click(move |_, _, cx| {
+                                    .on_click(move |_, window, cx| {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| this.set_loading(cx));
                                         }
-                                        on_ok(handle.clone(), cx);
+                                        on_ok(handle.clone(), window, cx);
                                     }),
                             ),
                     )
@@ -468,7 +471,7 @@ pub fn open_confirm(
     ok_variant: ButtonVariant,
     window: &mut Window,
     cx: &mut App,
-    on_ok: impl Fn(WeakEntity<ConfirmContent>, &mut App) + 'static,
+    on_ok: impl Fn(WeakEntity<ConfirmContent>, &mut Window, &mut App) + 'static,
 ) {
     let title_str = SharedString::from(title.to_string());
     let dialog_title = title_str.clone();
@@ -576,7 +579,7 @@ impl Render for ChangePinContent {
                 )
                 .into_any_element(),
 
-            DialogPhase::Loading => v_flex()
+            DialogPhase::Loading | DialogPhase::LoadingWithMessage(_) => v_flex()
                 .gap_4()
                 .child("Enter your current PIN and choose a new one.")
                 .child(
@@ -887,7 +890,7 @@ impl Render for SetPinContent {
                 )
                 .into_any_element(),
 
-            DialogPhase::Loading => v_flex()
+            DialogPhase::Loading | DialogPhase::LoadingWithMessage(_) => v_flex()
                 .gap_4()
                 .child("Choose a PIN for your pico-key.")
                 .child(
@@ -1100,6 +1103,13 @@ pub struct StatusContent {
 }
 
 impl StatusContent {
+    /// Transitions the dialog into a loading state while displaying a custom, dynamic status message.
+    /// Useful for multi-step background operations where user context needs to be updated.
+    pub fn set_loading(&mut self, msg: impl Into<String>, cx: &mut Context<Self>) {
+        self.phase = DialogPhase::LoadingWithMessage(msg.into());
+        cx.notify();
+    }
+
     pub fn set_success(&mut self, msg: String, cx: &mut Context<Self>) {
         self.phase = DialogPhase::Success(msg);
         cx.notify();
@@ -1177,6 +1187,18 @@ impl Render for StatusContent {
                     )
                     .into_any_element()
             }
+
+            DialogPhase::LoadingWithMessage(msg) => v_flex()
+                .gap_4()
+                .items_center()
+                .child(msg.clone())
+                .child(
+                    Button::new("loading")
+                        .primary()
+                        .label("Applying...")
+                        .loading(true),
+                )
+                .into_any_element(),
 
             _ => v_flex()
                 .gap_4()

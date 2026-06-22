@@ -111,6 +111,12 @@ impl HomeView {
                                 true,
                             ))
                             .child(Self::render_kv(
+                                "Firmware Type",
+                                status.firmware_type.to_string(),
+                                theme,
+                                false,
+                            ))
+                            .child(Self::render_kv(
                                 "VID:PID",
                                 format!("{}:{}", config.vid, config.pid),
                                 theme,

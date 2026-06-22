@@ -59,6 +59,26 @@ pub fn delete_credential(pin: String, credential_id: String) -> Result<String, S
     fido::delete_credential(pin, credential_id)
 }
 
+pub fn reset_device() -> Result<String, String> {
+    fido::reset_device()
+}
+
+pub fn read_led_config() -> Result<LedStatusConfig, PFError> {
+    rescue::read_led_config()
+}
+
+pub fn write_led_status(status: u8, color: u8, brightness: u8, steady: bool) -> Result<String, PFError> {
+    rescue::write_led_status(status, color, brightness, steady)
+}
+
+pub fn read_management_config() -> Result<ManagementAppConfig, PFError> {
+    rescue::read_management_config()
+}
+
+pub fn write_management_config(enabled_mask: u16) -> Result<String, PFError> {
+    rescue::write_management_config(enabled_mask)
+}
+
 pub fn enable_enterprise_attestation(pin: String) -> Result<String, String> {
     fido::enable_enterprise_attestation(pin)
 }

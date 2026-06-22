@@ -1,4 +1,4 @@
-//! Constants, enums, bitflags and data structures for Rescue Application for pico-fido firmware.
+//! Constants, enums, bitflags and data structures for Rescue and vendor applets.
 #![allow(unused)]
 
 // use serde::{Deserialize, Serialize};
@@ -91,10 +91,11 @@ pub enum PhyTag {
     LedGpio = 0x04,
     LedBrightness = 0x05,
     Opts = 0x06,
-    PresenceTimeout = 0x08, // Previously TAG_UP_BTN
+    PresenceTimeout = 0x08,
     UsbProduct = 0x09,
     Curves = 0x0A,
     LedDriver = 0x0C,
+    LedOrder = 0x0D,
 }
 
 impl PhyTag {
@@ -109,6 +110,7 @@ impl PhyTag {
             0x09 => Some(Self::UsbProduct),
             0x0A => Some(Self::Curves),
             0x0C => Some(Self::LedDriver),
+            0x0D => Some(Self::LedOrder),
             _ => None,
         }
     }
@@ -129,3 +131,113 @@ bitflags::bitflags! {
         const SECP256K1 = 0x08;
     }
 }
+
+// --- 4. Vendor/LED Applet (RS-Key specific) ---
+
+pub const VENDOR_LED_AID: &[u8] = &[0xF0, 0x00, 0x00, 0x00, 0x01];
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VendorLedInstruction {
+    SetLed = 0x10,
+    GetLed = 0x11,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedColor {
+    Off = 0,
+    Red = 1,
+    Green = 2,
+    Blue = 3,
+    Yellow = 4,
+    Magenta = 5,
+    Cyan = 6,
+    White = 7,
+}
+
+impl LedColor {
+    pub fn from_u8(val: u8) -> Option<Self> {
+        match val {
+            0 => Some(Self::Off),
+            1 => Some(Self::Red),
+            2 => Some(Self::Green),
+            3 => Some(Self::Blue),
+            4 => Some(Self::Yellow),
+            5 => Some(Self::Magenta),
+            6 => Some(Self::Cyan),
+            7 => Some(Self::White),
+            _ => None,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Red => "Red",
+            Self::Green => "Green",
+            Self::Blue => "Blue",
+            Self::Yellow => "Yellow",
+            Self::Magenta => "Magenta",
+            Self::Cyan => "Cyan",
+            Self::White => "White",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::Off, Self::Red, Self::Green, Self::Blue,
+            Self::Yellow, Self::Magenta, Self::Cyan, Self::White,
+        ]
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedStatus {
+    Idle = 0,
+    Processing = 1,
+    Touch = 2,
+    Boot = 3,
+}
+
+impl LedStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Idle => "Idle",
+            Self::Processing => "Processing",
+            Self::Touch => "Touch",
+            Self::Boot => "Boot",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Idle, Self::Processing, Self::Touch, Self::Boot]
+    }
+}
+
+// --- 5. Management Applet (Yubico-compatible, RS-Key) ---
+
+pub const MANAGEMENT_AID: &[u8] = &[0xA0, 0x00, 0x00, 0x05, 0x27, 0x47, 0x11, 0x17];
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagementInstruction {
+    ReadConfig = 0x1D,
+    WriteConfig = 0x1C,
+}
+
+pub const MGMT_TAG_USB_SUPPORTED: u8 = 0x01;
+pub const MGMT_TAG_SERIAL: u8 = 0x02;
+pub const MGMT_TAG_USB_ENABLED: u8 = 0x03;
+pub const MGMT_TAG_FORM_FACTOR: u8 = 0x04;
+pub const MGMT_TAG_VERSION: u8 = 0x05;
+pub const MGMT_TAG_DEVICE_FLAGS: u8 = 0x08;
+pub const MGMT_TAG_CONFIG_LOCK: u8 = 0x0A;
+
+pub const USB_CAP_OTP: u16 = 0x0001;
+pub const USB_CAP_U2F: u16 = 0x0002;
+pub const USB_CAP_OPENPGP: u16 = 0x0008;
+pub const USB_CAP_PIV: u16 = 0x0010;
+pub const USB_CAP_OATH: u16 = 0x0020;
+pub const USB_CAP_FIDO2: u16 = 0x0200;

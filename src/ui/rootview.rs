@@ -55,7 +55,7 @@ impl ApplicationRoot {
                     .map(|s| s.info.serial != status.info.serial)
                     .unwrap_or(true);
 
-                self.device.status = Some(status);
+                self.device.status = Some(status.clone());
                 self.device.error = None;
 
                 if device_changed {
@@ -72,6 +72,14 @@ impl ApplicationRoot {
                     }
                 }
 
+                if status.firmware_type == crate::device::types::FirmwareType::RSKey && status.method == crate::device::types::DeviceMethod::Rescue {
+                    self.device.led_status = io::read_led_config().ok();
+                    self.device.management_apps = io::read_management_config().ok();
+                } else {
+                    self.device.led_status = None;
+                    self.device.management_apps = None;
+                }
+
                 if let Some(config_view) = &self.views.config
                     && let Some(window) = window
                 {
@@ -85,6 +93,8 @@ impl ApplicationRoot {
                 self.device.status = None;
                 self.device.error = Some(format!("{}", e));
                 self.device.fido_info = None;
+                self.device.led_status = None;
+                self.device.management_apps = None;
             }
         }
         self.device.loading = false;

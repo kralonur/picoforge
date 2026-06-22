@@ -4,7 +4,7 @@ pub mod hid;
 use crate::{
     device::types::{
         AppConfig, AppConfigInput, DeviceInfo, DeviceMethod, FidoDeviceInfo, FullDeviceStatus,
-        StoredCredential,
+        StoredCredential, RSKEY_AAGUID, PICOFIDO_AAGUID, FirmwareType,
     },
     error::PFError,
 };
@@ -488,6 +488,26 @@ pub(crate) fn delete_credential(pin: String, credential_id_hex: String) -> Resul
     Ok("Credential deleted successfully".into())
 }
 
+pub(crate) fn reset_device() -> Result<String, String> {
+    log::info!("Starting FIDO authenticatorReset...");
+
+    let transport =
+        HidTransport::open().map_err(|e| format!("Could not open HID transport: {}", e))?;
+
+    transport.reset().map_err(|e| {
+        let s = e.to_string();
+        if s.contains("0x30") {
+            return "Reset not allowed. The device must be unplugged and re-plugged within 10 seconds before sending the reset command.".to_string();
+        }
+        if s.contains("0x27") {
+            return "Reset declined. Touch was not confirmed on the device.".to_string();
+        }
+        format!("Reset failed: {}", s)
+    })?;
+
+    Ok("Device has been factory reset. All credentials and PIN have been erased.".to_string())
+}
+
 // Custom Fido functions ( works only with pico-fido firmware )
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -553,6 +573,14 @@ pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
             .unwrap_or_else(|| "Unknown".to_string())
     };
 
+    let firmware_type = if fido_info.aaguid == RSKEY_AAGUID {
+        FirmwareType::RSKey
+    } else if fido_info.aaguid == PICOFIDO_AAGUID {
+        FirmwareType::PicoFido
+    } else {
+        FirmwareType::Unknown
+    };
+
     Ok(FullDeviceStatus {
         info: DeviceInfo {
             serial: management
@@ -566,6 +594,7 @@ pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
         secure_boot: false,
         secure_lock: false,
         method: DeviceMethod::Fido,
+        firmware_type,
     })
 }
 
@@ -1041,6 +1070,7 @@ mod tests {
             power_cycle_on_reset: None,
             led_steady: None,
             enable_secp256k1: None,
+            led_order: None,
         }
     }
 

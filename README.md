@@ -23,9 +23,9 @@
 > Check application [Installation Wiki](https://github.com/librekeys/picoforge/wiki/Installation) for installation guide of the PicoForge app on your system.
 >
 > **Supported Firmwares:**
-> - **pico-fido**: v7.0, v7.2, v7.4, v7.6
-> - **LibreKeys One**: v7.4.2
-> - **RSKeys**: v0.2.8
+> - **[pico-fido](https://github.com/polhenarejos/pico-fido)**: v7.0, v7.2, v7.4, v7.6
+> - **[LibreKeys One](https://github.com/librekeys/pico-fido-firmwares/releases)**: v7.4.2
+> - **[RSKeys](https://github.com/TheMaxMur/RS-Key)**: v0.2.8
 >
 > **Configuration Support:**
 > - **pico-fido v7.0/v7.2** & **LibreKeys One v7.4.2**: Hardware configuration via FIDO mode is supported.

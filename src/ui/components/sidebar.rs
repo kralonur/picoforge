@@ -221,15 +221,18 @@ impl<V: 'static> AppSidebar<V> {
                                     .child({
                                         let (text, color_bg, color_text) =
                                             if let Some(status) = &state.status {
+                                                let is_rskey = status.firmware_type == crate::device::types::FirmwareType::RSKey;
+                                                let fw_label = if is_rskey { "RS-Key" } else { "Pico-FIDO" };
+                                                
                                                 if status.method == DeviceMethod::Fido {
-                                                    ("Online - Fido", rgb(0xf59e0b), rgb(0xffffff))
+                                                    (format!("Online - FIDO ({})", fw_label), rgb(0xf59e0b), rgb(0xffffff))
                                                 } else {
-                                                    ("Online", rgb(0x16a34a), rgb(0xffffff))
+                                                    (format!("Online - {}", fw_label), rgb(0x16a34a), rgb(0xffffff))
                                                 }
                                             } else if state.error.is_some() {
-                                                ("Error", rgb(0xd97706), rgb(0xffffff))
+                                                ("Error".to_string(), rgb(0xd97706), rgb(0xffffff))
                                             } else {
-                                                ("Offline", rgb(0xef4444), rgb(0xffffff))
+                                                ("Offline".to_string(), rgb(0xef4444), rgb(0xffffff))
                                             };
 
                                         div()
