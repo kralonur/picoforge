@@ -404,43 +404,33 @@ impl ConfigView {
         let Some(status) = &device.status else { return };
 
         let current_config = &status.config;
-        let mut changes = AppConfigInput {
-            vid: None,
-            pid: None,
-            product_name: None,
-            led_gpio: None,
-            led_brightness: None,
-            touch_timeout: None,
-            led_driver: None,
-            led_dimmable: None,
-            power_cycle_on_reset: None,
-            led_steady: None,
-            enable_secp256k1: None,
-            led_order: None,
-        };
+        let mut has_changes = false;
 
         let vid = self.vid_input.read(cx).text().to_string();
         if vid != current_config.vid {
-            changes.vid = Some(vid);
+            has_changes = true;
         }
 
         let pid = self.pid_input.read(cx).text().to_string();
         if pid != current_config.pid {
-            changes.pid = Some(pid);
+            has_changes = true;
         }
 
         let product_name = self.product_name_input.read(cx).text().to_string();
         if product_name != current_config.product_name {
-            changes.product_name = Some(product_name);
+            has_changes = true;
         }
 
+        let mut final_led_gpio = current_config.led_gpio;
         let led_gpio_str = self.led_gpio_input.read(cx).text().to_string();
-        if let Ok(val) = led_gpio_str.parse::<u8>()
-            && val != current_config.led_gpio
-        {
-            changes.led_gpio = Some(val);
+        if let Ok(val) = led_gpio_str.parse::<u8>() {
+            if val != current_config.led_gpio {
+                has_changes = true;
+            }
+            final_led_gpio = val;
         }
 
+        let mut final_led_driver = current_config.led_driver;
         let driver_idx = self.led_driver_select.read(cx).selected_index(cx);
         if let Some(idx) = driver_idx
             && let Some(driver) = LedDriverType::all().get(idx.row)
@@ -448,51 +438,57 @@ impl ConfigView {
             let val = driver.value();
             let current_val = current_config.led_driver.unwrap_or(1);
             if val != current_val {
-                changes.led_driver = Some(val);
+                has_changes = true;
             }
+            final_led_driver = Some(val);
         }
 
         let brightness = self.led_brightness_slider.read(cx).value().start() as u8;
         if brightness != current_config.led_brightness {
-            changes.led_brightness = Some(brightness);
+            has_changes = true;
         }
 
+        let mut final_touch_timeout = current_config.touch_timeout;
         let touch_timeout_str = self.touch_timeout_input.read(cx).text().to_string();
-        if let Ok(val) = touch_timeout_str.parse::<u8>()
-            && val != current_config.touch_timeout
-        {
-            changes.touch_timeout = Some(val);
+        if let Ok(val) = touch_timeout_str.parse::<u8>() {
+            if val != current_config.touch_timeout {
+                has_changes = true;
+            }
+            final_touch_timeout = val;
         }
 
         if (self.led_dimmable != current_config.led_dimmable)
             || (self.led_steady != current_config.led_steady)
             || (self.power_cycle != current_config.power_cycle_on_reset)
         {
-            changes.led_dimmable = Some(self.led_dimmable);
-            changes.led_steady = Some(self.led_steady);
-            changes.power_cycle_on_reset = Some(self.power_cycle);
+            has_changes = true;
         }
 
         if self.enable_secp256k1 != current_config.enable_secp256k1 {
-            changes.enable_secp256k1 = Some(self.enable_secp256k1);
+            has_changes = true;
         }
-
-        let has_changes = changes.vid.is_some()
-            || changes.pid.is_some()
-            || changes.product_name.is_some()
-            || changes.led_gpio.is_some()
-            || changes.led_brightness.is_some()
-            || changes.touch_timeout.is_some()
-            || changes.led_driver.is_some()
-            || changes.led_dimmable.is_some()
-            || changes.power_cycle_on_reset.is_some()
-            || changes.led_steady.is_some()
-            || changes.enable_secp256k1.is_some();
 
         if !has_changes {
             log::info!("No changes detected");
             return;
         }
+
+        let changes = AppConfigInput {
+            vid: Some(vid),
+            pid: Some(pid),
+            product_name: Some(product_name),
+            led_gpio: Some(final_led_gpio),
+            led_brightness: Some(brightness),
+            touch_timeout: Some(final_touch_timeout),
+            led_driver: final_led_driver,
+            led_dimmable: Some(self.led_dimmable),
+            power_cycle_on_reset: Some(self.power_cycle),
+            led_steady: Some(self.led_steady),
+            enable_secp256k1: Some(self.enable_secp256k1),
+            led_order: current_config.led_order,
+        };
+
+
 
         let method = status.method.clone();
 
@@ -923,6 +919,13 @@ impl ConfigView {
                             .child(
                                 Button::new(gpui::SharedString::from(format!("color-btn-{}", i)))
                                     .child(color_name)
+                                    .custom(
+                                        ButtonCustomVariant::new(cx)
+                                            .color(rgb(0x27272a).into())
+                                            .hover(rgb(0x3f3f46).into())
+                                            .active(rgb(0x52525b).into())
+                                            .border(theme.border),
+                                    )
                                     .disabled(is_fido)
                                     .on_click(cycle_color_listener)
                             )
@@ -930,6 +933,13 @@ impl ConfigView {
                             .child(
                                 Button::new(gpui::SharedString::from(format!("bdec-btn-{}", i)))
                                     .child("-")
+                                    .custom(
+                                        ButtonCustomVariant::new(cx)
+                                            .color(rgb(0x1b1b1d).into())
+                                            .hover(rgb(0x232325).into())
+                                            .active(rgb(0x3f3f46).into())
+                                            .border(theme.border),
+                                    )
                                     .disabled(is_fido || brightness_val == 0)
                                     .on_click(dec_bright_listener)
                             )
@@ -937,7 +947,14 @@ impl ConfigView {
                             .child(
                                 Button::new(gpui::SharedString::from(format!("binc-btn-{}", i)))
                                     .child("+")
-                                    .disabled(is_fido || brightness_val == 15)
+                                    .custom(
+                                        ButtonCustomVariant::new(cx)
+                                            .color(rgb(0x1b1b1d).into())
+                                            .hover(rgb(0x232325).into())
+                                            .active(rgb(0x3f3f46).into())
+                                            .border(theme.border),
+                                    )
+                                    .disabled(is_fido || brightness_val >= 15)
                                     .on_click(inc_bright_listener)
                             )
                     )
@@ -950,6 +967,13 @@ impl ConfigView {
             gpui_component::h_flex().justify_end().child(
                 Button::new("apply-rskey-leds")
                     .child("Save LED Status")
+                    .custom(
+                        ButtonCustomVariant::new(cx)
+                            .color(rgb(0xe3e3e6).into())
+                            .hover(rgb(0xcfcfd1).into())
+                            .active(rgb(0xe3e3e6).into())
+                            .foreground(rgb(0x4b4b4e).into()),
+                    )
                     .disabled(is_fido || self.loading)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.apply_rskey_led_settings(window, cx);
@@ -1056,6 +1080,13 @@ impl ConfigView {
             gpui_component::h_flex().justify_end().child(
                 Button::new("apply-rskey-apps")
                     .child("Save USB Applications")
+                    .custom(
+                        ButtonCustomVariant::new(cx)
+                            .color(rgb(0xe3e3e6).into())
+                            .hover(rgb(0xcfcfd1).into())
+                            .active(rgb(0xe3e3e6).into())
+                            .foreground(rgb(0x4b4b4e).into()),
+                    )
                     .disabled(is_fido || self.loading)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.apply_rskey_apps_settings(window, cx);
