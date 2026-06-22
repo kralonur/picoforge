@@ -496,6 +496,7 @@ impl ConfigView {
             power_cycle_on_reset: Some(self.power_cycle),
             led_steady: Some(self.led_steady),
             enable_secp256k1: Some(self.enable_secp256k1),
+            raw_curves_mask: current_config.raw_curves_mask,
             led_order: current_config.led_order,
             enabled_usb_itf: final_enabled_usb_itf,
         };

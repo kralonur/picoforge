@@ -222,8 +222,9 @@ pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
                     }
                 }
                 PhyTag::Curves => {
-                    if val.len() >= 4 {
+                    if val.len() == 4 {
                         let curves_val = u32::from_be_bytes([val[0], val[1], val[2], val[3]]);
+                        config.raw_curves_mask = Some(curves_val);
                         let curves = RescueCurves::from_bits_truncate(curves_val);
                         config.enable_secp256k1 = curves.contains(RescueCurves::SECP256K1);
                     }
@@ -334,15 +335,18 @@ pub fn write_config(config: AppConfigInput) -> Result<String, PFError> {
     }
 
     // Curves
-    if let Some(enabled) = config.enable_secp256k1 {
-        let mut curves = RescueCurves::empty();
-        if enabled {
-            curves.insert(RescueCurves::SECP256K1);
+    if config.enable_secp256k1.is_some() || config.raw_curves_mask.is_some() {
+        let mut mask = config.raw_curves_mask.unwrap_or(0);
+        if let Some(enabled) = config.enable_secp256k1 {
+            if enabled {
+                mask |= RescueCurves::SECP256K1.bits();
+            } else {
+                mask &= !RescueCurves::SECP256K1.bits();
+            }
         }
-
         tlv.push(PhyTag::Curves as u8);
         tlv.push(0x04);
-        tlv.write_u32::<BigEndian>(curves.bits()).unwrap();
+        tlv.write_u32::<BigEndian>(mask).unwrap();
     }
 
     // LED Driver (Tag 0x0C)
