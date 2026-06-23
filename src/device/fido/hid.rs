@@ -740,11 +740,8 @@ impl HidTransport {
         let mut block = Block::<aes::Aes256>::try_from(pin_hash_16).unwrap();
 
         let shared_secret_bytes = shared_secret.as_ref();
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(
-            shared_secret_bytes,
-            &iv,
-        )
-        .unwrap();
+        let mut encryptor =
+            cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv).unwrap();
         encryptor.encrypt_block(&mut block);
         let pin_hash_enc = block.to_vec();
 
@@ -777,13 +774,11 @@ impl HidTransport {
                 Some(Value::Bytes(token_enc)) => {
                     // Decrypt the PIN token using shared secret (AES-256-CBC, IV=0)
                     let mut token_buf = token_enc.clone();
-                    let decrypted = cbc::Decryptor::<aes::Aes256>::new_from_slices(
-                        shared_secret_bytes,
-                        &iv,
-                    )
-                    .map_err(|_| PFError::Device("Failed to create decryptor".into()))?
-                    .decrypt_padded::<NoPadding>(&mut token_buf)
-                    .map_err(|_| PFError::Device("Failed to decrypt PIN token".into()))?;
+                    let decrypted =
+                        cbc::Decryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv)
+                            .map_err(|_| PFError::Device("Failed to create decryptor".into()))?
+                            .decrypt_padded::<NoPadding>(&mut token_buf)
+                            .map_err(|_| PFError::Device("Failed to decrypt PIN token".into()))?;
                     log::info!("Successfully obtained and decrypted PIN token (Subcommand 0x05).");
                     Ok(decrypted.to_vec())
                 }
@@ -857,11 +852,8 @@ impl HidTransport {
         let mut block = Block::<aes::Aes256>::try_from(pin_hash_16).unwrap();
 
         let shared_secret_bytes = shared_secret.as_ref();
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(
-            shared_secret_bytes,
-            &iv,
-        )
-        .unwrap();
+        let mut encryptor =
+            cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv).unwrap();
         encryptor.encrypt_block(&mut block);
         let pin_hash_enc = block.to_vec();
 
@@ -902,13 +894,11 @@ impl HidTransport {
                 Some(Value::Bytes(token_enc)) => {
                     // Decrypt the PIN token using shared secret (AES-256-CBC, IV=0)
                     let mut token_buf = token_enc.clone();
-                    let decrypted = cbc::Decryptor::<aes::Aes256>::new_from_slices(
-                        shared_secret_bytes,
-                        &iv,
-                    )
-                    .map_err(|_| PFError::Device("Failed to create decryptor".into()))?
-                    .decrypt_padded::<NoPadding>(&mut token_buf)
-                    .map_err(|_| PFError::Device("Failed to decrypt PIN token".into()))?;
+                    let decrypted =
+                        cbc::Decryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv)
+                            .map_err(|_| PFError::Device("Failed to create decryptor".into()))?
+                            .decrypt_padded::<NoPadding>(&mut token_buf)
+                            .map_err(|_| PFError::Device("Failed to decrypt PIN token".into()))?;
                     log::info!("Successfully obtained and decrypted PIN token (Subcommand 0x09).");
                     Ok(decrypted.to_vec())
                 }
@@ -986,11 +976,8 @@ impl HidTransport {
 
         let iv = [0u8; 16];
         let mut new_pin_enc = Vec::new();
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(
-            shared_secret_bytes,
-            &iv,
-        )
-        .unwrap();
+        let mut encryptor =
+            cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv).unwrap();
         for chunk in padded_new_pin.chunks_exact(16) {
             let mut block = Block::<aes::Aes256>::try_from(chunk).unwrap();
             encryptor.encrypt_block(&mut block);
@@ -1106,12 +1093,9 @@ impl HidTransport {
         let pin_hash_16 = &pin_hash.as_ref()[0..16];
         let iv = [0u8; 16];
         let mut block = Block::<aes::Aes256>::try_from(pin_hash_16).unwrap();
-        cbc::Encryptor::<aes::Aes256>::new_from_slices(
-            shared_secret_bytes,
-            &iv,
-        )
-        .unwrap()
-        .encrypt_block(&mut block);
+        cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv)
+            .unwrap()
+            .encrypt_block(&mut block);
         let pin_hash_enc = block.to_vec();
 
         // 6. Encrypt newPinEnc
@@ -1120,11 +1104,8 @@ impl HidTransport {
         padded_new_pin[..bytes.len()].copy_from_slice(bytes);
 
         let mut new_pin_enc = Vec::new();
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(
-            shared_secret_bytes,
-            &iv,
-        )
-        .unwrap();
+        let mut encryptor =
+            cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv).unwrap();
         for chunk in padded_new_pin.chunks_exact(16) {
             let mut block = Block::<aes::Aes256>::try_from(chunk).unwrap();
             encryptor.encrypt_block(&mut block);
@@ -1744,11 +1725,7 @@ mod tests {
         let mut block = Block::<aes::Aes256>::try_from(pin_hash_16).unwrap();
         let original = block;
 
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(
-            &key,
-            &iv,
-        )
-        .unwrap();
+        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(&key, &iv).unwrap();
         encryptor.encrypt_block(&mut block);
 
         // The encrypted block MUST differ from the original

@@ -10,8 +10,6 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use pcsc::{Context, Protocols, Scope, ShareMode};
 use std::io::Cursor;
 
-
-
 /// Connects to the first available reader and selects the Rescue Applet
 fn connect_and_select() -> Result<(pcsc::Card, Vec<u8>, FirmwareType), PFError> {
     let ctx = Context::establish(Scope::User).map_err(|e| {

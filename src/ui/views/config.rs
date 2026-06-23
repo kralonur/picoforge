@@ -1204,12 +1204,12 @@ impl ConfigView {
                 } else {
                     mask &= !bit;
                 }
-                
+
                 if bit == 0x01 {
                     // Force CCID on to prevent bricking
                     mask |= 0x01;
                 }
-                
+
                 this.enabled_usb_itf = Some(mask);
                 cx.notify();
             });
@@ -1218,15 +1218,18 @@ impl ConfigView {
                 gpui_component::h_flex()
                     .items_center()
                     .justify_between()
-                    .child(v_flex().gap_0p5().child(name).child(
-                        div().text_sm().text_color(theme.muted_foreground).child(
-                            if is_ccid {
-                                "Required for Rescue Applet"
-                            } else {
-                                "USB Endpoint"
-                            },
+                    .child(
+                        v_flex().gap_0p5().child(name).child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child(if is_ccid {
+                                    "Required for Rescue Applet"
+                                } else {
+                                    "USB Endpoint"
+                                }),
                         ),
-                    ))
+                    )
                     .child(
                         Switch::new(gpui::SharedString::from(format!("usb-itf-toggle-{}", bit)))
                             .checked(is_enabled || is_ccid) // CCID always looks checked
@@ -1311,7 +1314,9 @@ impl Render for ConfigView {
         if is_rskey {
             let rskey_led = self.render_rskey_led_card(cx, is_fido).into_any_element();
             let rskey_apps = self.render_rskey_apps_card(cx, is_fido).into_any_element();
-            let rskey_usb_itf = self.render_rskey_usb_itf_card(cx, is_fido).into_any_element();
+            let rskey_usb_itf = self
+                .render_rskey_usb_itf_card(cx, is_fido)
+                .into_any_element();
             grid_children.push(rskey_led);
             grid_children.push(rskey_apps);
             grid_children.push(rskey_usb_itf);
