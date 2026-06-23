@@ -628,7 +628,7 @@ pub fn write_config(config: AppConfigInput) -> Result<String, PFError> {
 ///
 /// # Arguments
 /// * `to_bootsel` - If `true`, device enters UF2 bootloader mode for firmware flashing.
-///                  If `false`, device performs a normal reboot into FIDO mode.
+///   If `false`, device performs a normal reboot into FIDO mode.
 ///
 /// # Returns
 /// A confirmation string if the reboot command was accepted.
