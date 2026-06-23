@@ -1,12 +1,23 @@
+//! Shared types for device communication.
+//!
+//! Organized into three groups:
+//! - Application-level types: device info, config, and status used across both protocols
+//! - Rescue (PC/SC) types: LED and USB applet configuration read/written over PC/SC
+//! - FIDO2 types: credential and authenticator info from CTAP2
+
 #![allow(unused)]
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+// ── Application-level types ─────────────────────────────────────────────────
+
+/// Internal application state holding device info for the current session.
 struct PForgeState {
     device_info: DeviceInfo,
 }
 
+/// Basic device identity and flash usage reported by the firmware.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
@@ -16,6 +27,7 @@ pub struct DeviceInfo {
     pub firmware_version: String,
 }
 
+/// Full device configuration (USB descriptors, LED, touch, crypto options).
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
@@ -39,6 +51,7 @@ pub struct AppConfig {
     pub enabled_usb_itf: Option<u8>,
 }
 
+/// Partial config update; `None` fields are left unchanged on the device.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfigInput {
@@ -58,6 +71,7 @@ pub struct AppConfigInput {
     pub enabled_usb_itf: Option<u8>,
 }
 
+/// Aggregated snapshot of device info, config, and security state.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FullDeviceStatus {
@@ -69,6 +83,7 @@ pub struct FullDeviceStatus {
     pub firmware_type: FirmwareType,
 }
 
+/// Protocol channel used to communicate with the device.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum DeviceMethod {
     #[serde(rename = "FIDO")]
@@ -76,8 +91,8 @@ pub enum DeviceMethod {
     Rescue,
 }
 
-/// Represents the recognized firmware variants running on the connected hardware token.
-/// Used extensively to gate UI features, connection methods, and compatibility checks.
+/// Recognized firmware variants. Gates UI features, connection methods, and
+/// compatibility checks throughout the application.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub enum FirmwareType {
     PicoFido,
@@ -96,31 +111,29 @@ impl fmt::Display for FirmwareType {
     }
 }
 
-/// The globally unique Authenticator Attestation GUID (AAGUID) assigned to RS-Key hardware.
-pub const RSKEY_AAGUID: &str = "2479C7BF6B3056839EC80E8171A918B7";
-/// The globally unique Authenticator Attestation GUID (AAGUID) assigned to Pico-Fido hardware.
-pub const PICOFIDO_AAGUID: &str = "89FB94B706C936739B7E30526D968145";
+// ── Rescue (PC/SC) types ────────────────────────────────────────────────────
 
-/// Aggregates the LED status configurations read from the RS-Key Vendor/LED applet.
-/// Contains the global steady flag and a fixed array of `(color_code, brightness)` pairs
-/// mapped chronologically to device statuses: [Idle, Processing, Touch, Boot].
+/// LED status configuration read from the Vendor/LED applet.
+/// `statuses` is a fixed array of `(color, brightness)` pairs indexed by
+/// device status: Idle, Processing, Touch, Boot.
 #[derive(Serialize, Debug, Default, Clone, PartialEq)]
 pub struct LedStatusConfig {
     pub steady: bool,
     pub statuses: [(u8, u8); 4],
 }
 
-/// Encapsulates the bitmasks defining USB application endpoints on the device.
-/// The `usb_supported` mask indicates which applets the firmware is capable of running,
-/// while `usb_enabled` reflects the active endpoints the device will enumerate on next boot.
+/// USB application endpoint bitmasks from the Management applet.
+/// `usb_supported` lists applets the firmware can run;
+/// `usb_enabled` lists those active on next boot.
 #[derive(Serialize, Debug, Default, Clone, PartialEq)]
 pub struct ManagementAppConfig {
     pub usb_supported: u16,
     pub usb_enabled: u16,
 }
 
-// Fido stuff:
+// ── FIDO2 types ─────────────────────────────────────────────────────────────
 
+/// Authenticator metadata from CTAP2 GetInfo.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FidoDeviceInfo {
@@ -145,6 +158,7 @@ pub struct FidoDeviceInfo {
     pub max_cred_blob_length: Option<i128>,
 }
 
+/// A single FIDO2 credential stored on the device.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredCredential {
@@ -155,3 +169,10 @@ pub struct StoredCredential {
     pub user_id: String,
     pub credential_id: String,
 }
+
+// ── Constants ───────────────────────────────────────────────────────────────
+
+/// AAGUID assigned to RS-Key hardware.
+pub const RSKEY_AAGUID: &str = "2479C7BF6B3056839EC80E8171A918B7";
+/// AAGUID assigned to Pico-Fido hardware.
+pub const PICOFIDO_AAGUID: &str = "89FB94B706C936739B7E30526D968145";
