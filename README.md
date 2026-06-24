@@ -196,65 +196,13 @@ Then you can build from source and run the application with:
 cargo run
 ```
 
-## Project Structure
-
-```
-picoforge/
-├── Cargo.toml                              # Rust dependencies and project metadata
-├── Cargo.lock                              # Rust dependency lock file
-├── Packager.toml                           # Configuration for cargo-packager
-├── src/                                    # Source code
-│   ├── main.rs                             # Application entry point
-│   ├── logging.rs                          # Logging infrastructure
-│   ├── error.rs                            # Global application error types
-│   ├── device/                             # Device communication logic
-│   │   ├── fido/                           # FIDO implementation
-│   │   ├── rescue/                         # Rescue mode handling
-│   │   ├── io.rs                           # IO Utilities
-│   │   ├── mod.rs                          # Device module declaration
-│   │   └── types.rs                        # Device data types
-│   └── ui/                                 # GPUI Frontend
-│       ├── components/                     # Reusable UI components
-│       ├── views/                          # View definitions
-│       ├── assets.rs                       # Asset loader
-│       ├── colors.rs                       # Color definitions
-│       ├── rootview.rs                     # Root view container
-│       ├── types.rs                        # UI-specific types
-│       └── mod.rs                          # UI module declaration
-├── data/                                   # Application data
-│   ├── in.suyogtandel.picoforge.desktop    # Linux desktop entry file
-│   └── screenshots/                        # Screenshots for documentation
-├── docs/                                   # Project documentation/wiki files
-│   ├── Building.md                         # Instructions for building from source
-│   ├── Home.md                             # Wiki home page
-│   ├── Installation.md                     # Installation guide
-│   └── Troubleshooting.md                  # Troubleshooting common issues
-├── maintainers/                            # Scripts and resources for package maintainers
-│   └── scripts/                            # Utility scripts for automating maintenance tasks
-│       ├── update.nix                      # Nix update script configuration
-│       └── update.py                       # Update script implementation
-├── static/                                 # Static application assets
-│   ├── appIcons/                           # App icons in various sizes and formats
-│   └── icons/                              # Internal SVG icons used by the GPUI frontend
-├── themes/                                 # Application themes
-│   └── picoforge-zinc.json                 # Zinc theme configuration file
-├── flake.nix                               # Nix flake configuration
-├── flake.lock                              # Nix flake lock file
-├── default.nix                             # Nix package definition/shell
-├── shell.nix                               # Nix development shell
-├── picoforge.spec                          # RPM Spec file
-├── package.nix                             # Nix package definition
-├── ci.nix                                  # CI configuration for cachix
-├── rustfmt.toml                            # Rust formatting configuration
-├── CREDITS.md                              # Credits
-└── LICENSE                                 # License
-```
-
 ## Contributing
 
 Contributions are welcome (REALLY NEEDED, PLEASE HELP US)! 
 
 Please check the [CONTRIBUTING.md](.github/CONTRIBUTING.md) file for the full contribution process and development guidelines.
+
+Reference the [project source code documentation](https://docs.librekeys.org/picoforge/picoforge/index.html) for API details and architecture overview.
 
 ## License
 
