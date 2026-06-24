@@ -892,33 +892,26 @@ impl ConfigView {
             let color_val = self.led_status_colors[i];
             let brightness_val = self.led_status_brightness[i];
 
-            // A dropdown for color, and a simple + / - or slider for brightness.
-            // But we don't have a simple dropdown component that works inline easily without a state entity per row.
-            // Let's just use a simple label and two buttons to cycle color, or we can instantiate 4 SelectStates?
-            // Since we need SelectState for dropdowns, we can't easily spawn them dynamically in render without keeping them in the struct.
-            // A simpler approach for the UI: Just show the current color text and + / - buttons to cycle it, and + / - for brightness.
-            // This avoids adding 4 SelectStates and 4 SliderStates to ConfigView.
-            let c_i = i;
             let cycle_color_listener = cx.listener(move |this, _, _, cx| {
-                let mut c = this.led_status_colors[c_i];
-                c = (c + 1) % 8;
-                this.led_status_colors[c_i] = c;
+                let mut c = this.led_status_colors[i];
+                c = (c + 1) % LedColor::all().len() as u8;
+                this.led_status_colors[i] = c;
                 cx.notify();
             });
 
             let dec_bright_listener = cx.listener(move |this, _, _, cx| {
-                let mut b = this.led_status_brightness[c_i];
+                let mut b = this.led_status_brightness[i];
                 b = b.saturating_sub(1);
-                this.led_status_brightness[c_i] = b;
+                this.led_status_brightness[i] = b;
                 cx.notify();
             });
 
             let inc_bright_listener = cx.listener(move |this, _, _, cx| {
-                let mut b = this.led_status_brightness[c_i];
+                let mut b = this.led_status_brightness[i];
                 if b < 15 {
                     b += 1;
                 }
-                this.led_status_brightness[c_i] = b;
+                this.led_status_brightness[i] = b;
                 cx.notify();
             });
 

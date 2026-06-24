@@ -254,8 +254,6 @@ impl HidTransport {
     fn init_channel(device: &hidapi::HidDevice) -> Result<u32, PFError> {
         log::debug!("Initializing CTAPHID channel...");
 
-        // --- Drain Step ---
-        // Read and discard any pending packets to avoid using a stale response for CID negotiation.
         let mut drain_buf = [0u8; HID_REPORT_SIZE];
         while let Ok(n) = device.read_timeout(&mut drain_buf[..], HID_READ_TIMEOUT_MS) {
             if n == 0 {
@@ -746,7 +744,6 @@ impl HidTransport {
         let pin_auth = self.sign_config_command(pin_token, sub_cmd as u8, &sub_params_bytes);
 
         // Build full authenticatorConfig map with keys in ASCENDING ORDER
-        // Keeping the map item in the correct order is critical - the firmware parser rejects out-of-order keys with CTAP2_ERR_INVALID_CBOR
         let mut config_map = BTreeMap::new();
         config_map.insert(
             Value::Integer(ConfigParam::SubCommand as i128), // 0x01
@@ -1897,12 +1894,6 @@ impl HidTransport {
         sub_cmd: u8,
         sub_params_bytes: Option<&[u8]>,
     ) -> Vec<u8> {
-        // Research into pico-fido firmware reveals a non-standard signing logic:
-        // 1. No 32-byte 0xff padding.
-        // 2. No command byte (0x0d).
-        // 3. For subcommands 0x01 (GetCredsMetadata) and 0x02 (EnumerateRpsBegin), only sign the subcommand byte.
-        // 4. For others, sign the subcommand byte followed by the CBOR-encoded SubCommandParams map.
-
         let mut message = vec![sub_cmd];
         if let Some(params) = sub_params_bytes
             && sub_cmd != CredentialMgmtSubCommand::GetCredsMetadata as u8
@@ -1941,16 +1932,8 @@ mod tests {
 
         let cbor = to_vec(&Value::Map(map)).unwrap();
 
-        // Canonical CBOR requires keys to be in ascending order.
-        // BTreeMap in Rust is already ordered by key.
-        // So 0x01, 0x02, 0x03, 0x04, 0x09 should be in order.
-
-        // Let's check the first few bytes of the map
-        // 0xA5 (Map of 5)
-        // 0x01 (Key 1) ...
         assert_eq!(cbor[0], 0xA5);
         assert_eq!(cbor[1], 0x01);
-        // We just care that it's ordered for pico-fido
     }
 
     #[test]

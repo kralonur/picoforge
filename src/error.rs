@@ -11,7 +11,6 @@ pub enum PFError {
     Device(String),
 }
 
-// Allow error to be serialized to string for Tauri
 impl serde::Serialize for PFError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

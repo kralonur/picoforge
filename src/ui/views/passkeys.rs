@@ -421,8 +421,6 @@ impl PasskeysView {
                         .child("Confirm New PIN")
                         .child(Input::new(&confirm)),
                 )
-                // on_ok is triggered by the Enter key (dialog binds Enter → Confirm action → on_ok).
-                // Return false so the dialog stays open; our submit closes it and opens a status dialog.
                 .on_ok(move |_, window, cx| {
                     submit_for_ok(window, cx);
                     false

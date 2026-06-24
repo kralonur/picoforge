@@ -221,8 +221,6 @@ fn connect_and_select() -> Result<(pcsc::Card, Vec<u8>, FirmwareType), PFError> 
     if !rx.ends_with(&[0x90, 0x00]) {
         log::error!("Rescue Applet not found on the device!");
         return Err(PFError::Device(
-            // There is no such mode as fido, i tink the rescue applet stays active and at the same time fido mode works?
-            // Need to study this more.
             "Rescue Applet not found on device. Is it in FIDO mode?".into(),
         ));
     }
